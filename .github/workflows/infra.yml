@@ -1,0 +1,106 @@
+name: Infrastructure
+
+# Manual trigger only, for now. Adding pull_request / push comes later, once
+# the flow is understood. A manual trigger also decouples "change the code"
+# from "run the pipeline" while debugging.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terragrunt command to run
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+
+# GITHUB_TOKEN scopes for this run. Declaring the block at all resets every
+# unlisted scope to none, which is the allowlist behaviour we want.
+permissions:
+  contents: read   # actions/checkout needs this to clone the repository
+  id-token: write  # allows the job to REQUEST an OIDC token; grants no writes
+
+# Only one run at a time may touch this unit's state. Without this, two
+# concurrent runs would fight over the GCS state lock.
+concurrency:
+  group: infra-dev-storage
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: gcp-infra-499507
+  STATE_BUCKET: gcp-infra-499507-tfstate
+
+  # Neither of these is a secret. They are identifiers, useless without an
+  # OIDC token that satisfies the provider's attribute condition.
+  WIF_PROVIDER: projects/1063348389495/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  SERVICE_ACCOUNT: github-actions-deployer@gcp-infra-499507.iam.gserviceaccount.com
+
+  # Pinned to the versions used locally. Drift here is a classic source of
+  # "works on my machine".
+  TOFU_VERSION: 1.12.5
+  TERRAGRUNT_VERSION: v1.1.1
+
+  TG_NON_INTERACTIVE: "true"
+
+jobs:
+  storage:
+    name: dev / storage
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: live/dev/storage
+
+    steps:
+      # The runner starts with an EMPTY working directory. Unlike GitLab CI,
+      # GitHub does not clone the repository for you.
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # Requests an OIDC token from GitHub, exchanges it at GCP STS for a
+      # federated token, impersonates the service account, then writes the
+      # result as Application Default Credentials on the runner. Everything
+      # downstream picks it up from the environment.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      # Proves authentication works before any IaC runs. If this fails, the
+      # problem is OIDC/WIF/IAM, not Terragrunt or OpenTofu.
+      - name: Verify authentication
+        run: |
+          gcloud auth list
+          gcloud storage ls "gs://${STATE_BUCKET}"
+
+      # tofu_wrapper installs a shim that intercepts stdout. Terragrunt calls
+      # tofu itself, so the shim only gets in the way.
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      # No official Terragrunt action; fetching the release binary directly
+      # keeps the supply chain small and visible.
+      # $GITHUB_PATH affects LATER steps, not this one, hence the full path.
+      - name: Install Terragrunt
+        working-directory: .
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sSLf -o "$HOME/bin/terragrunt" \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/${TERRAGRUNT_VERSION}/terragrunt_linux_amd64"
+          chmod +x "$HOME/bin/terragrunt"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/terragrunt" --version
+
+      - name: Terragrunt plan
+        run: terragrunt plan
+
+      - name: Terragrunt apply
+        if: inputs.action == 'apply'
+        run: terragrunt apply -auto-approve

@@ -1,0 +1,32 @@
+# OpenTofu / Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Terragrunt
+.terragrunt-cache/
+
+# Variable files may carry environment-specific secrets
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Credentials: nothing resembling a service-account key should ever be committed
+*-key.json
+*credentials*.json
+gha-creds-*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
