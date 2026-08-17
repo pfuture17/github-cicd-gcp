@@ -32,7 +32,7 @@ env:
 
   # Neither of these is a secret. They are identifiers, useless without an
   # OIDC token that satisfies the provider's attribute condition.
-  WIF_PROVIDER: projects/1063348389495/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  WIF_PROVIDER: projects/1063348389495/locations/global/workloadIdentityPools/gha-pool/providers/github-oidc
   SERVICE_ACCOUNT: github-actions-deployer@gcp-infra-499507.iam.gserviceaccount.com
 
   # Pinned to the versions used locally. Drift here is a classic source of
